@@ -1,7 +1,7 @@
 #!/bin/bash
 
 Mode="live"   # change to "test" for simulation  "live" for live script
-
+counter=0   # used in decay score related
 LOG_FILE="auth_tracker.log"
 ALERT_FILE="alerts.log"
 
@@ -100,6 +100,60 @@ get_score() {
     val=$(grep "^$key|" "$file" | cut -d'|' -f2)
     [[ -z "$val" ]] && echo 0 || echo "$val"
 }
+
+#score decay 
+
+decay_scores() {
+    for file in "$IP_SCORE_FILE" "$USER_SCORE_FILE" "$PAIR_SCORE_FILE"; do
+
+        awk -F'|' '{
+            new = int($2 * 0.9)
+
+            if (new > 0)
+                print $1 "|" new
+        }' "$file" > tmp && mv tmp "$file"
+
+    done
+}
+
+#check for slow attacks
+check_multi_layer_attack() {
+    user="$1"
+
+    # -------------------------
+    # Layer 1: 1 hour window
+    # -------------------------
+    count_1h=$(get_recent_logs 3600 \
+        | awk -F'|' -v user="$user" '$3 == user' \
+        | wc -l)
+
+    if [ "$count_1h" -gt 8 ]; then
+        log_alert "MEDIUM_ATTACK_1H" "$user"
+    fi
+
+    # -------------------------
+    # Layer 2: 10 hour window
+    # -------------------------
+    count_10h=$(get_recent_logs 36000 \
+        | awk -F'|' -v user="$user" '$3 == user' \
+        | wc -l)
+
+    if [ "$count_10h" -gt 30 ]; then
+        log_alert "SLOW_ATTACK_10H" "$user"
+    fi
+
+    # -------------------------
+    # Layer 3: 24 hour window
+    # -------------------------
+    count_24h=$(get_recent_logs 86400 \
+        | awk -F'|' -v user="$user" '$3 == user' \
+        | wc -l)
+
+    if [ "$count_24h" -gt 80 ]; then
+        log_alert "PERSISTENT_ATTACK_24H" "$user"
+    fi
+}
+
 
 # ----------------------------
 # HONOUR SCORE ENGINE
@@ -241,6 +295,18 @@ else
         record_attempt "$ip" "$user"
         calculate_and_update_scores "$ip" "$user"
         decide_action "$ip" "$user"
+	check_multi_layer_attack "$user"
+	# increment counter
+	counter=$((counter + 1))
+
+	# decay every 10 attempts
+	if (( counter % 10 == 0 )); then
+    		echo "[INFO] Applying score decay..."
+    		decay_scores
+	fi
+
+
+
 
     done
 fi
