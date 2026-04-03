@@ -1,6 +1,6 @@
 #!/bin/bash
 
-Mode="test"   # change to "test" for simulation
+Mode="live"   # change to "test" for simulation  "live" for live script
 
 LOG_FILE="auth_tracker.log"
 ALERT_FILE="alerts.log"
@@ -11,6 +11,23 @@ PAIR_SCORE_FILE="pair_scores.db"
 
 touch "$LOG_FILE" "$ALERT_FILE"
 touch "$IP_SCORE_FILE" "$USER_SCORE_FILE" "$PAIR_SCORE_FILE"
+
+
+WHITELIST=("127.0.0.1" "::1")
+
+is_whitelisted_ip() {
+    ip="$1"
+
+    for whiteip in "${WHITELIST[@]}"; do
+        if [[ "$ip" == "$whiteip" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+
 
 # ----------------------------
 # ALERT SYSTEM (with cooldown)
@@ -214,6 +231,12 @@ else
         [[ -z "$user" || -z "$ip" ]] && continue
 
         echo "[LOG] $user from $ip"
+
+
+	if is_whitelisted_ip "$ip"; then
+    		echo "[INFO] Skipping trusted IP: $ip"
+   		 continue
+	fi
 
         record_attempt "$ip" "$user"
         calculate_and_update_scores "$ip" "$user"
